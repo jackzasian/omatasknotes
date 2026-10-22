@@ -52,6 +52,7 @@ Panel {
   property bool settingsOpen: false
   readonly property bool settingsRowVisible: root.vaultUnconfigured || root.viewNeeded || root.settingsOpen
 
+  readonly property bool readOnly: setting("readOnly", true) !== false
   readonly property string countMode: String(setting("countMode", "all"))
   readonly property int refreshIntervalSec: Math.max(10, Number(setting("refreshIntervalSec", 60)))
   readonly property string helper: Qt.resolvedUrl("bin/omatasknotes").toString().replace("file://", "")
@@ -75,12 +76,8 @@ Panel {
   readonly property var dueTasks: openTasks.filter(function (t) { return t.due !== "" && t.due <= root.today })
   readonly property int badgeCount: countMode === "due" ? dueTasks.length : openTasks.length
 
-  readonly property var rows: openTasks.concat(justDone).sort(function (a, b) {
-    var ad = a.due === "" ? "9999-99-99" : a.due
-    var bd = b.due === "" ? "9999-99-99" : b.due
-    if (ad !== bd) return ad < bd ? -1 : 1
-    return a.title.localeCompare(b.title)
-  })
+  // The helper already applies the chosen Base view's sort order.
+  readonly property var rows: openTasks.concat(justDone)
 
   readonly property string summary: {
     if (root.vaultUnconfigured) return "No vault set"
@@ -148,6 +145,7 @@ Panel {
   }
 
   function completeTask(task) {
+    if (root.readOnly) { root.openInObsidian(task); return }
     if (!task || editProc.running) return
     editProc.mode = "complete"
     editProc.subject = task
@@ -168,7 +166,7 @@ Panel {
   }
 
   function undoTask(entry) {
-    if (!entry || editProc.running) return
+    if (root.readOnly || !entry || editProc.running) return
     root.justDone = root.justDone.filter(function (e) { return e.file !== entry.file })
     editProc.mode = "uncomplete"
     editProc.subject = null
@@ -189,7 +187,7 @@ Panel {
   }
 
   function addTask(text) {
-    if (!root.vaultActive || editProc.running || String(text).trim() === "") return
+    if (root.readOnly || !root.vaultActive || editProc.running || String(text).trim() === "") return
     editProc.mode = "add"
     editProc.subject = null
     editProc.command = [root.helper, "create", root.vaultPath, String(text).trim()]
@@ -633,6 +631,8 @@ Panel {
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   onClicked: row.done ? root.undoTask(row.modelData) : root.completeTask(row.modelData)
+                  ToolTip.visible: containsMouse
+                  ToolTip.text: root.readOnly ? "Open in Obsidian to complete or edit" : "Complete task"
                 }
               }
 
@@ -656,11 +656,11 @@ Panel {
                   id: labelMouse
                   anchors.fill: parent
                   hoverEnabled: true
-                  acceptedButtons: Qt.RightButton
+                  acceptedButtons: root.readOnly ? (Qt.LeftButton | Qt.RightButton) : Qt.RightButton
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.openInObsidian(row.modelData)
                   ToolTip.visible: containsMouse
-                  ToolTip.text: "Right-click: open in Obsidian"
+                  ToolTip.text: root.readOnly ? "Open in Obsidian" : "Right-click: open in Obsidian"
                 }
               }
 
@@ -705,9 +705,20 @@ Panel {
             visible: root.viewReady
           }
 
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            visible: root.viewReady && root.readOnly
+            text: "Read-only · click a task to edit in Obsidian"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
           TextField {
             id: addField
-            visible: root.viewReady
+            visible: root.viewReady && !root.readOnly
             width: parent.width
             foreground: root.foreground
             accent: root.accent

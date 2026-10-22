@@ -22,7 +22,8 @@
       "vaultPath": "",
       "viewId": "",
       "countMode": "all",
-      "refreshIntervalSec": 60
+      "refreshIntervalSec": 60,
+      "readOnly": true
     },
     "schema": [
       {
@@ -43,7 +44,10 @@
         "key": "countMode",
         "type": "enum",
         "label": "Bar icon lights up for",
-        "options": ["all", "due"],
+        "options": [
+          "all",
+          "due"
+        ],
         "defaultValue": "all",
         "description": "all keeps the icon lit whenever the current view has any open task; due lights it only for tasks due today or earlier."
       },
@@ -56,6 +60,13 @@
         "step": 10,
         "defaultValue": 60,
         "description": "How often the vault is rescanned. The popup also rescans every time it opens."
+      },
+      {
+        "key": "readOnly",
+        "type": "boolean",
+        "label": "Read-only task view",
+        "defaultValue": true,
+        "description": "Open tasks in Obsidian instead of changing notes. Keeps native recurrence, calendar and sync behavior in TaskNotes."
       }
     ]
   }

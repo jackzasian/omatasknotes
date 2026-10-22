@@ -15,6 +15,27 @@ widget.
 
 <img src="preview.png" alt="The popup listing a TaskNotes view's open tasks" width="380">
 
+## Local desktop adaptation
+
+This branch defaults to a **read-only task view**. Click a title or checkbox
+with either mouse button to open the task in Obsidian; complete, capture and
+edit tasks there. Quick add is hidden. Keeping native TaskNotes responsible
+for writes preserves occurrence materialisation, Google Calendar reconciliation,
+area tags and existing sync bridges. Set `readOnly: false` only after checking
+write compatibility for your vault; the bundled writer does not implement all
+modern TaskNotes occurrence and provider behaviour.
+
+The chosen Base view's order is preserved, including its exact default priority
+formula (which can differ from TaskNotes' custom priority UI weights).
+Customised or missing sort formula expressions, including dependencies, make a
+view unsupported instead of silently changing its meaning. Base-level and
+view-level filters both apply. The recurrence writer honours the due-offset
+setting when enabled and still advances deadlines that would otherwise precede
+the next occurrence when disabled, matching TaskNotes.
+
+Regression checks: `python3 -m unittest discover -s tests -v`. They create
+and remove temporary fixture vaults, never touching a personal vault.
+
 ## How it's meant to be used
 
 The vault is the only state -- no database, no account, no cache beyond one
@@ -150,6 +171,7 @@ From the widget's entry in `~/.config/omarchy/shell.json`:
 
 | Key | Default | What it does |
 |---|---|---|
+| `readOnly` | `true` | Open tasks in Obsidian; block completion/undo/quick add in the bar |
 | `vaultPath` | *(auto)* | Vault folder; empty means ask Obsidian |
 | `viewId` | *(none)* | Which TaskNotes view to show; set from the popup's picker |
 | `countMode` | `all` | `all` lights the icon for any open task; `due` only for today or earlier |

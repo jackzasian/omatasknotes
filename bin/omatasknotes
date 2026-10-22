@@ -821,21 +821,35 @@ KNOWN_FORMULAS = {
     "isOverdue": lambda row, settings: (
         parse_date(field(row, "due")) is not None
         and parse_date(field(row, "due")) < date.today()
-        and str(field(row, "status")) not in ("done", "archived")),
+        and str(field(row, "status")) != "done"),
     "isDueToday": lambda row, settings: parse_date(field(row, "due")) == date.today(),
     "isDueThisWeek": lambda row, settings: _due_this_week(row),
     "isScheduledToday": lambda row, settings: parse_date(field(row, "scheduled")) == date.today(),
     "isRecurring": lambda row, settings: truthy(field(row, "recurrence")),
+    "daysUntilNext": lambda row, settings: days_until_next(row),
     "urgencyScore": lambda row, settings: urgency_score(row, settings),
 }
 
 
+# These are expression contracts, not formula-name aliases. A customised
+# expression must never silently inherit the default formula's behaviour.
+KNOWN_FORMULA_EXPRESSIONS = {
+    "priorityWeight": 'if(priority=="none",0,if(priority=="low",1,if(priority=="normal",2,if(priority=="high",3,999))))',
+    "daysUntilDue": 'if(due, ((number(date(due)) - number(today())) / 86400000).floor(), null)',
+    "daysUntilScheduled": 'if(scheduled, ((number(date(scheduled)) - number(today())) / 86400000).floor(), null)',
+    "isOverdue": 'due && date(due) < today() && status != "done"',
+    "isDueToday": 'due && date(due).date() == today()',
+    "isDueThisWeek": 'due && date(due) >= today() && date(due) <= today() + "7d"',
+    "isScheduledToday": 'scheduled && date(scheduled).date() == today()',
+    "isRecurring": 'recurrence && !recurrence.isEmpty()',
+    "daysUntilNext": 'if(due && scheduled, min(formula.daysUntilDue, formula.daysUntilScheduled), if(due, formula.daysUntilDue, formula.daysUntilScheduled))',
+    "urgencyScore": 'if(!due && !scheduled, formula.priorityWeight, formula.priorityWeight + max(0, 10 - formula.daysUntilNext))',
+}
+
+
 def priority_weight(row, settings):
-    prios = priority_lookup(settings)
-    p = prios.get(field(row, "priority"))
-    if p is None:
-        return 999
-    return p.get("weight", 999)
+    # Match the validated Base expression, which may differ from UI weights.
+    return {"none": 0, "low": 1, "normal": 2, "high": 3}.get(field(row, "priority"), 999)
 
 
 def days_until(value):
@@ -869,11 +883,16 @@ def urgency_score(row, settings):
     return pw + max(0, 10 - dn)
 
 
-def resolve_sort_key(name):
+def resolve_sort_key(name, formulas):
     if name.startswith("formula."):
         fname = name[len("formula."):]
         if fname not in KNOWN_FORMULAS:
             raise Unsupported("unrecognised formula: %r" % name)
+        expected = KNOWN_FORMULA_EXPRESSIONS[fname]
+        if formulas.get(fname) != expected:
+            raise Unsupported("custom or missing formula: %r" % name)
+        for dependency in re.findall(r"formula\.([A-Za-z0-9_]+)", expected):
+            resolve_sort_key("formula." + dependency, formulas)
         return ("formula", fname)
     return ("field", name)
 
@@ -924,6 +943,9 @@ def list_base_views(vault_path, views_dir_rel="TaskNotes/Views"):
             if vtype not in ("tasknotesTaskList",):
                 supported, reason = False, "view type %r not shown in a list popup" % vtype
             filters = v.get("filters", top_filters)
+            if top_filters is not None and v.get("filters") is not None:
+                filters = {"and": [top_filters, v["filters"]]}
+            formulas = doc.get("formulas") or {}
             try:
                 if supported and filters is not None:
                     # validate_tree, never eval_tree: this must visit every
@@ -937,13 +959,13 @@ def list_base_views(vault_path, views_dir_rel="TaskNotes/Views"):
                 if not supported:
                     break
                 try:
-                    resolve_sort_key(sort_entry.get("property", ""))
+                    resolve_sort_key(sort_entry.get("property", ""), formulas)
                 except Unsupported as e:
                     supported, reason = False, str(e)
             out.append({
                 "id": key, "name": vname, "source": rel,
                 "kind": "base", "supported": supported, "reason": reason,
-                "_filters": filters, "_sort": v.get("sort") or [],
+                "_filters": filters, "_sort": v.get("sort") or [], "_formulas": formulas,
             })
     return out
 
@@ -1088,7 +1110,7 @@ def cmd_scan(vault_path, view_id):
             keys = []
             for entry in view.get("_sort") or []:
                 try:
-                    k = resolve_sort_key(entry.get("property", ""))
+                    k = resolve_sort_key(entry.get("property", ""), view.get("_formulas", {}))
                 except Unsupported:
                     continue
                 v = sort_value(row, settings, k)
@@ -1296,7 +1318,7 @@ def _mutate(vault_path, rel_path, expected_hash, make_done, restore_mode=None, r
             nxt = next_open_occurrence(rule, max(today, inst), completed, skipped, anchor, fallback)
             if nxt:
                 blocks = set_field(blocks, "scheduled", nxt + suffix)
-                if due and work_sched and due[:10] < nxt:
+                if due and work_sched and (settings.get("maintainDueDateOffsetInRecurring", False) or due[:10] < nxt):
                     try:
                         delta = date.fromisoformat(due[:10]) - date.fromisoformat(work_sched[:10])
                         blocks = set_field(blocks, "due", (date.fromisoformat(nxt) + delta).isoformat() + due[10:])
